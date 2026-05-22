@@ -124,7 +124,7 @@ MIT License © 2025 Hamza Ahmad
 - I'm open to internships , remote jobs , freelance projects, or tech collaboration.
 - Hamza Ahmad
 - 📧 Email: [HamzaxDevelopers](mailto:hamzaxdevelopers1223@gmail.com)
-- 🌐 Portfolio: [https://portfolio.hamzaxdevelopers.dpdns.org](https://portfolio.hamzaxdevelopers.dpdns.org) 
+- 🌐 Portfolio: [https://hamzaahmad-098.github.io/Portfolio/](https://hamzaahmad-098.github.io/Portfolio/) 
 
 # ⭐️ Support
 If you like this project or learned something, please consider giving a ⭐️ on the repository!
