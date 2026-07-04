@@ -488,7 +488,6 @@
       <p id="scannerStatus">Starting camera...</p>
     </div>
     <div id="qr-reader"></div>
-    <video id="nativeScannerVideo" playsinline muted style="display:none; width:100%; height:100%; object-fit:cover;"></video>
     <div class="scanner-frame-overlay">
       <div class="scanner-frame">
         <div class="scanner-corners">
@@ -506,31 +505,6 @@
     </div>
   </div>
 <script>
-// Validates EAN-13 / UPC-A / EAN-8 check digits to catch camera misreads.
-// A misread digit will almost always fail this check, so this rejects
-// the vast majority of bad scans before they ever reach the server.
-function isValidBarcodeChecksum(code) {
-  const digits = code.split('').map(Number);
-  const len = digits.length;
-
-  if (len === 13) { // EAN-13
-    let sum = 0;
-    for (let i = 0; i < 12; i++) sum += digits[i] * (i % 2 === 0 ? 1 : 3);
-    return ((10 - (sum % 10)) % 10) === digits[12];
-  }
-  if (len === 12) { // UPC-A
-    let sum = 0;
-    for (let i = 0; i < 11; i++) sum += digits[i] * (i % 2 === 0 ? 3 : 1);
-    return ((10 - (sum % 10)) % 10) === digits[11];
-  }
-  if (len === 8) { // EAN-8
-    let sum = 0;
-    for (let i = 0; i < 7; i++) sum += digits[i] * (i % 2 === 0 ? 3 : 1);
-    return ((10 - (sum % 10)) % 10) === digits[7];
-  }
-  return true; // other lengths (e.g. internal 14-digit codes) can't be checksum-verified this way
-}
-
 // Simplified ProductForm without rupee conversion
 class ProductForm {
   constructor() {
@@ -655,8 +629,6 @@ class ProductForm {
     }
   }
 
-  // Scanner: uses the native BarcodeDetector API when available
-  // (hardware-accelerated, much faster) and falls back to Html5-Qrcode otherwise
   async openScanner() {
     if (this.isScanning) return;
     const scannerSection = document.getElementById('scannerSection');
@@ -664,63 +636,6 @@ class ProductForm {
     scannerSection.style.display = 'flex';
     scannerStatus.textContent = 'Starting camera...';
     this.isScanning = true;
-    this.pendingCode = null;
-    this.pendingCount = 0;
-
-    const formats = ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128'];
-
-    if ('BarcodeDetector' in window) {
-      try {
-        await this.startNativeScanner(formats);
-        return;
-      } catch (error) {
-        console.warn('Native scanner unavailable, falling back:', error);
-      }
-    }
-    await this.startHtml5QrcodeScanner();
-  }
-
-  async startNativeScanner(formats) {
-    const video = document.getElementById('nativeScannerVideo');
-    document.getElementById('qr-reader').style.display = 'none';
-    video.style.display = 'block';
-    this.usingNativeDetector = true;
-    this.detector = new BarcodeDetector({ formats });
-
-    this.nativeStream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: this.isBackCamera ? 'environment' : 'user',
-        advanced: [{ focusMode: 'continuous' }]
-      }
-    });
-    video.srcObject = this.nativeStream;
-    await video.play();
-
-    const scannerStatus = document.getElementById('scannerStatus');
-    scannerStatus.textContent = '✓ Camera ready - Point at barcode';
-    scannerStatus.style.color = '#28a745';
-
-    this.nativeDetectLoop(video);
-  }
-
-  async nativeDetectLoop(video) {
-    if (!this.isScanning || !this.usingNativeDetector) return;
-    try {
-      const barcodes = await this.detector.detect(video);
-      if (barcodes.length > 0) this.onScanSuccess(barcodes[0].rawValue);
-    } catch (error) {
-      // transient decode error, keep looping
-    }
-    if (this.isScanning && this.usingNativeDetector) {
-      requestAnimationFrame(() => this.nativeDetectLoop(video));
-    }
-  }
-
-  async startHtml5QrcodeScanner() {
-    this.usingNativeDetector = false;
-    document.getElementById('qr-reader').style.display = 'block';
-    document.getElementById('nativeScannerVideo').style.display = 'none';
-    const scannerStatus = document.getElementById('scannerStatus');
     try {
       this.scanner = new Html5Qrcode("qr-reader");
       const devices = await Html5Qrcode.getCameras();
@@ -729,17 +644,10 @@ class ProductForm {
       }
       const cameraId = this.isBackCamera && devices.length > 1 ? devices[devices.length - 1].id : devices[0].id;
       const config = {
-        fps: 15,
+        fps: 30,
         qrbox: { width: 250, height: 150 },
         aspectRatio: 1.7,
         disableFlip: false,
-        formatsToSupport: [
-          Html5QrcodeSupportedFormats.EAN_13,
-          Html5QrcodeSupportedFormats.EAN_8,
-          Html5QrcodeSupportedFormats.UPC_A,
-          Html5QrcodeSupportedFormats.UPC_E,
-          Html5QrcodeSupportedFormats.CODE_128
-        ],
         videoConstraints: {
           facingMode: this.isBackCamera ? "environment" : "user",
           advanced: [{ focusMode: "continuous" }]
@@ -788,28 +696,9 @@ class ProductForm {
       this.showToast('❌ Scanned code is not a valid product barcode', 'error');
       return;
     }
-
-    // Reject misreads immediately using the barcode's own check digit
-    if (!isValidBarcodeChecksum(cleanBarcode)) {
-      this.pendingCode = null;
-      this.pendingCount = 0;
-      return; // ignore silently, camera keeps scanning
-    }
-
-    // Require the same value on two consecutive frames before trusting it
-    if (this.pendingCode === cleanBarcode) {
-      this.pendingCount = (this.pendingCount || 0) + 1;
-    } else {
-      this.pendingCode = cleanBarcode;
-      this.pendingCount = 1;
-    }
-    if (this.pendingCount < 2) return;
-
     if (cleanBarcode === this.lastScannedCode) return;
     this.lastScannedCode = cleanBarcode;
     this.scanCooldown = true;
-    this.pendingCode = null;
-    this.pendingCount = 0;
     const scannerStatus = document.getElementById('scannerStatus');
     scannerStatus.textContent = '✅ Barcode Scanned!';
     scannerStatus.style.color = '#28a745';
@@ -832,25 +721,15 @@ class ProductForm {
   }
 
   async closeScanner() {
-    if (this.usingNativeDetector) {
-      if (this.nativeStream) {
-        this.nativeStream.getTracks().forEach(track => track.stop());
-        this.nativeStream = null;
-      }
-      const video = document.getElementById('nativeScannerVideo');
-      if (video) video.srcObject = null;
-    } else if (this.scanner) {
+    if (this.scanner) {
       try { await this.scanner.stop(); this.scanner.clear(); } catch (error) {}
       this.scanner = null;
     }
     const scannerSection = document.getElementById('scannerSection');
     scannerSection.style.display = 'none';
     this.isScanning = false;
-    this.usingNativeDetector = false;
     this.scanCooldown = false;
     this.lastScannedCode = null;
-    this.pendingCode = null;
-    this.pendingCount = 0;
   }
 
   playBeep() {
