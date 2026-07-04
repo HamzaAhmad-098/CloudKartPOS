@@ -538,6 +538,7 @@
       <p id="scannerStatus">Starting camera...</p>
     </div>
     <div id="qr-reader"></div>
+    <video id="nativeScannerVideo" playsinline muted style="display:none; width:100%; height:100%; object-fit:cover;"></video>
     <div class="scanner-frame-overlay">
       <div class="scanner-frame">
         <div class="scanner-corners">
@@ -641,6 +642,8 @@
         }
       }
 
+      // Scanner: uses the native BarcodeDetector API when available
+      // (hardware-accelerated, much faster) and falls back to Html5-Qrcode otherwise
       async openScanner() {
         if (this.isScanning) return;
         const scannerSection = document.getElementById('scannerSection');
@@ -648,6 +651,63 @@
         scannerSection.style.display = 'flex';
         scannerStatus.textContent = 'Starting camera...';
         this.isScanning = true;
+        this.pendingCode = null;
+        this.pendingCount = 0;
+
+        const formats = ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128'];
+
+        if ('BarcodeDetector' in window) {
+          try {
+            await this.startNativeScanner(formats);
+            return;
+          } catch (error) {
+            console.warn('Native scanner unavailable, falling back:', error);
+          }
+        }
+        await this.startHtml5QrcodeScanner();
+      }
+
+      async startNativeScanner(formats) {
+        const video = document.getElementById('nativeScannerVideo');
+        document.getElementById('qr-reader').style.display = 'none';
+        video.style.display = 'block';
+        this.usingNativeDetector = true;
+        this.detector = new BarcodeDetector({ formats });
+
+        this.nativeStream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: this.isBackCamera ? 'environment' : 'user',
+            advanced: [{ focusMode: 'continuous' }]
+          }
+        });
+        video.srcObject = this.nativeStream;
+        await video.play();
+
+        const scannerStatus = document.getElementById('scannerStatus');
+        scannerStatus.textContent = '✓ Camera ready - Point at barcode';
+        scannerStatus.style.color = '#28a745';
+
+        this.nativeDetectLoop(video);
+      }
+
+      async nativeDetectLoop(video) {
+        if (!this.isScanning || !this.usingNativeDetector) return;
+        try {
+          const barcodes = await this.detector.detect(video);
+          if (barcodes.length > 0) this.onScanSuccess(barcodes[0].rawValue);
+        } catch (error) {
+          // transient decode error, keep looping
+        }
+        if (this.isScanning && this.usingNativeDetector) {
+          requestAnimationFrame(() => this.nativeDetectLoop(video));
+        }
+      }
+
+      async startHtml5QrcodeScanner() {
+        this.usingNativeDetector = false;
+        document.getElementById('qr-reader').style.display = 'block';
+        document.getElementById('nativeScannerVideo').style.display = 'none';
+        const scannerStatus = document.getElementById('scannerStatus');
         try {
           this.scanner = new Html5Qrcode("qr-reader");
           const devices = await Html5Qrcode.getCameras();
@@ -759,13 +819,21 @@
       }
 
       async closeScanner() {
-        if (this.scanner) {
+        if (this.usingNativeDetector) {
+          if (this.nativeStream) {
+            this.nativeStream.getTracks().forEach(track => track.stop());
+            this.nativeStream = null;
+          }
+          const video = document.getElementById('nativeScannerVideo');
+          if (video) video.srcObject = null;
+        } else if (this.scanner) {
           try { await this.scanner.stop(); this.scanner.clear(); } catch (error) {}
           this.scanner = null;
         }
         const scannerSection = document.getElementById('scannerSection');
         scannerSection.style.display = 'none';
         this.isScanning = false;
+        this.usingNativeDetector = false;
         this.scanCooldown = false;
         this.lastScannedCode = null;
         this.pendingCode = null;
