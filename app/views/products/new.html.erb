@@ -540,6 +540,11 @@ class ProductForm {
     this.lastScannedCode = null;
     this.scanCooldown = false;
     this.initialized = false;
+    this.usingNativeDetector = false;
+    this.detector = null;
+    this.nativeStream = null;
+    this.pendingCode = null;
+    this.pendingCount = 0;
     this.init();
   }
 
