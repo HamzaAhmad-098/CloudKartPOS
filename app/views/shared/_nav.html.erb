@@ -1,0 +1,85 @@
+<%#
+  Shared navigation, rendered once from the layout so every page gets the
+  same "Dashboard / New Sale / Sales / Products" bar. Desktop shows a top
+  nav; mobile collapses to a fixed bottom tab bar with a raised FAB for
+  starting a new sale (the most common action on a shop floor).
+
+  NOTE: adjust `logout_path` below if your routes name the sign-out path
+  differently (e.g. `session_path`).
+%>
+<header class="topbar">
+  <div class="topbar-inner">
+    <a href="/" class="brand">
+      <div class="brand-mark">CK</div>
+      <div>
+        <div class="brand-text">CloudKart POS</div>
+        <div class="brand-sub"><%= Current.shop&.name || "Shop" %></div>
+      </div>
+    </a>
+
+    <nav class="desktop-nav">
+      <a href="/" class="<%= 'active' if current_page?('/') %>"><i class="fa-solid fa-gauge"></i> Dashboard</a>
+      <a href="<%= new_sale_path %>" class="<%= 'active' if current_page?(new_sale_path) %>"><i class="fa-solid fa-cart-plus"></i> New Sale</a>
+      <a href="<%= sales_path %>" class="<%= 'active' if current_page?(sales_path) %>"><i class="fa-solid fa-receipt"></i> Sales</a>
+      <a href="<%= products_path %>" class="<%= 'active' if current_page?(products_path) %>"><i class="fa-solid fa-box"></i> Products</a>
+    </nav>
+
+    <div class="topbar-actions">
+      <%= button_to "/logout", method: :delete, class: "btn btn-ghost btn-sm", form: { style: "display:contents" } do %>
+        <i class="fa-solid fa-right-from-bracket"></i><span class="d-none-mobile"> Logout</span>
+      <% end %>
+    </div>
+  </div>
+</header>
+
+<nav class="tab-bar">
+  <a href="/" class="tab-item <%= 'active' if current_page?('/') %>">
+    <span class="tab-dot"></span>
+    <i class="fa-solid fa-gauge"></i>
+    Home
+  </a>
+  <a href="<%= sales_path %>" class="tab-item <%= 'active' if current_page?(sales_path) %>">
+    <span class="tab-dot"></span>
+    <i class="fa-solid fa-receipt"></i>
+    Sales
+  </a>
+  <div class="tab-item-fab">
+    <a href="<%= new_sale_path %>" class="tab-fab" aria-label="New Sale">
+      <i class="fa-solid fa-plus"></i>
+    </a>
+  </div>
+  <a href="<%= products_path %>" class="tab-item <%= 'active' if current_page?(products_path) %>">
+    <span class="tab-dot"></span>
+    <i class="fa-solid fa-box"></i>
+    Products
+  </a>
+  <%# form: (not display:contents) is the real flex child now, sized like the <a> tabs above %>
+  <%= button_to "/logout", method: :delete, class: "tab-item-form", form: { class: "tab-item-form" } do %>
+    <i class="fa-solid fa-right-from-bracket"></i>
+    Logout
+  <% end %>
+</nav>
+
+<style>
+  .d-none-mobile{ display:none; }
+  @media (min-width:900px){ .d-none-mobile{ display:inline; } }
+
+  /* The logout <form> sits as a direct sibling of the <a> tab-items in
+     .tab-bar, so it needs the exact same flex-basis or the bar ends up
+     unevenly spaced (this was the bug: display:contents let the inner
+     <button> become the flex child instead, with no flex:1 of its own). */
+  .tab-bar .tab-item-form{ flex:1; margin:0; padding:0; display:flex; min-width:0; }
+  .tab-bar .tab-item-form button{
+    flex:1; width:100%; background:none; border:none; margin:0; cursor:pointer; font-family:inherit;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
+    color:var(--text-muted); font-size:11px; font-weight:600; padding:6px 2px; border-radius:12px; transition:.2s;
+  }
+  .tab-bar .tab-item-form button:active{ background:var(--bg); }
+  .tab-bar .tab-item-form button i{ font-size:18px; }
+
+  /* Desktop logout button (in the top bar) — its form still uses
+     display:contents on purpose: the <button> already carries the .btn
+     classes directly and doesn't need to match a sibling flex row like
+     the mobile tab bar does. */
+  .topbar-actions form button:hover{ background:var(--danger-light); color:var(--danger); }
+</style>

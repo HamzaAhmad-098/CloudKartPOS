@@ -1,38 +1,47 @@
-# app/views/products/bulk_import.html.erb
-<div class="container">
-  <div class="header">
-    <h1>Bulk Import Products</h1>
-    <%= link_to "Back to Products", products_path, class: "btn btn-secondary" %>
+<% content_for :title, "Bulk Import · CloudKart POS" %>
+
+<div class="app-shell" style="max-width:640px;">
+  <div class="flex items-center gap-12" style="margin-bottom:18px;">
+    <%= link_to products_path, class: "topbar-back" do %><i class="fa-solid fa-arrow-left"></i><% end %>
+    <div>
+      <h1 style="margin:0; font-size:20px; font-weight:800;">Bulk Import Products</h1>
+      <p class="text-muted" style="margin:2px 0 0; font-size:13.5px;">Add many products at once from a CSV file.</p>
+    </div>
   </div>
 
-  <div class="import-guide">
-    <h3>Import Guide</h3>
-    <p>Upload a CSV file with the following columns:</p>
-    <ul>
-      <li><strong>name</strong> (required) - Product name</li>
-      <li><strong>barcode</strong> - Barcode number</li>
-      <li><strong>sku</strong> - Stock keeping unit</li>
-      <li><strong>selling_price</strong> (required) - Selling price</li>
-      <li><strong>purchase_price</strong> - Purchase price</li>
-      <li><strong>current_stock</strong> - Initial stock quantity</li>
-      <li><strong>reorder_level</strong> - Low stock alert level</li>
-      <li><strong>category</strong> - Category name</li>
+  <div class="card card-pad" style="margin-bottom:16px;">
+    <div class="section-title"><div class="section-icon"><i class="fa-solid fa-circle-info"></i></div><h3>Import Guide</h3></div>
+    <p class="text-muted" style="font-size:14px; margin:0 0 14px;">Upload a CSV file with the following columns:</p>
+    <ul class="guide-list">
+      <li><strong>name</strong> <span class="req">required</span> — Product name</li>
+      <li><strong>barcode</strong> — Barcode number</li>
+      <li><strong>sku</strong> — Stock keeping unit</li>
+      <li><strong>selling_price</strong> <span class="req">required</span> — Selling price</li>
+      <li><strong>purchase_price</strong> — Purchase price</li>
+      <li><strong>current_stock</strong> — Initial stock quantity</li>
+      <li><strong>reorder_level</strong> — Low stock alert level</li>
+      <li><strong>category</strong> — Category name</li>
     </ul>
-    
-    <%= link_to "Download Template CSV", "#", class: "btn btn-outline" %>
+    <%= link_to "#", class: "btn btn-outline btn-sm" do %><i class="fa-solid fa-download"></i> Download Template CSV<% end %>
   </div>
 
-  <div class="import-form">
+  <div class="card card-pad">
+    <div class="section-title"><div class="section-icon" style="background:linear-gradient(135deg,#16a34a,#15803d);"><i class="fa-solid fa-file-csv"></i></div><h3>Upload File</h3></div>
     <%= form_with url: bulk_import_products_path, method: :post, local: true, multipart: true do |form| %>
       <div class="form-group">
         <%= form.label :file, "Select CSV File" %>
         <%= form.file_field :file, accept: ".csv", required: true, class: "form-control" %>
       </div>
-
-      <div class="form-actions">
-        <%= form.submit "Import Products", class: "btn btn-primary" %>
+      <div class="flex gap-10">
+        <%= form.submit "Import Products", class: "btn btn-primary", style: "flex:1;" %>
         <%= link_to "Cancel", products_path, class: "btn btn-outline" %>
       </div>
     <% end %>
   </div>
 </div>
+
+<style>
+  .guide-list{ list-style:none; margin:0 0 16px; padding:0; display:flex; flex-direction:column; gap:8px; }
+  .guide-list li{ font-size:13.5px; padding:8px 12px; background:var(--bg); border-radius:10px; }
+  .guide-list .req{ font-size:10.5px; font-weight:700; color:var(--danger); background:var(--danger-light); padding:1px 6px; border-radius:6px; margin-left:4px; }
+</style>
