@@ -27,6 +27,69 @@
     </div>
   </div>
 
+  <!-- Filters -->
+  <div class="card card-pad" style="margin-bottom:20px;">
+    <div class="section-title mb-0" style="margin-bottom:14px;"><div class="section-icon"><i class="fa-solid fa-filter"></i></div><h2 class="mb-0">Search & Filter</h2></div>
+
+    <%= form_with url: sales_path, method: :get, local: true, html: { id: "sales-filter-form" } do %>
+      <div class="form-group" style="margin-bottom:12px;">
+        <label for="sales_q">Search sales</label>
+        <div class="flex gap-10">
+          <input type="text" name="q" id="sales_q" value="<%= params[:q] %>" class="form-control"
+                 placeholder="Invoice #, customer name, or payment method">
+          <button type="button" class="btn btn-icon" id="clearSearchBtn" title="Clear search" style="<%= 'display:none;' unless params[:q].present? %>">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+      </div>
+
+      <div class="form-row" style="margin-bottom:12px;">
+        <div class="form-group">
+          <label for="sales_start_date">From date</label>
+          <input type="date" name="start_date" id="sales_start_date" value="<%= params[:start_date] %>" class="form-control" max="<%= Date.current %>">
+        </div>
+        <div class="form-group">
+          <label for="sales_end_date">To date</label>
+          <input type="date" name="end_date" id="sales_end_date" value="<%= params[:end_date] %>" class="form-control" max="<%= Date.current %>">
+        </div>
+      </div>
+
+      <div class="flex gap-10" style="flex-wrap:wrap;">
+        <div class="quick-range-chips">
+          <button type="button" class="chip" data-range="today">Today</button>
+          <button type="button" class="chip" data-range="yesterday">Yesterday</button>
+          <button type="button" class="chip" data-range="7">Last 7 days</button>
+          <button type="button" class="chip" data-range="30">Last 30 days</button>
+          <button type="button" class="chip" data-range="month">This month</button>
+        </div>
+      </div>
+
+      <div class="flex gap-10" style="margin-top:14px;">
+        <button type="submit" class="btn btn-primary" style="flex:1;"><i class="fa-solid fa-magnifying-glass"></i> Apply Filters</button>
+        <% if params[:q].present? || params[:start_date].present? || params[:end_date].present? %>
+          <%= link_to sales_path, class: "btn btn-secondary" do %><i class="fa-solid fa-rotate-left"></i> Reset<% end %>
+        <% end %>
+      </div>
+    <% end %>
+
+    <% if params[:q].present? || params[:start_date].present? || params[:end_date].present? %>
+      <div class="active-filters">
+        <i class="fa-solid fa-circle-info"></i>
+        <span>
+          Showing results
+          <% if params[:q].present? %>matching "<strong><%= params[:q] %></strong>"<% end %>
+          <% if params[:start_date].present? && params[:end_date].present? %>
+            from <strong><%= params[:start_date] %></strong> to <strong><%= params[:end_date] %></strong>
+          <% elsif params[:start_date].present? %>
+            from <strong><%= params[:start_date] %></strong> onward
+          <% elsif params[:end_date].present? %>
+            up to <strong><%= params[:end_date] %></strong>
+          <% end %>
+        </span>
+      </div>
+    <% end %>
+  </div>
+
   <!-- List -->
   <div class="card card-pad">
     <div class="flex items-center justify-between" style="margin-bottom:16px;">
@@ -37,9 +100,15 @@
     <% if @sales.empty? %>
       <div class="empty-state">
         <div class="empty-icon"><i class="fa-solid fa-cart-shopping"></i></div>
-        <h3>No sales yet</h3>
-        <p>Start selling to see your sales history here.</p>
-        <%= link_to "Create Your First Sale", new_sale_path, class: "btn btn-primary" %>
+        <% if params[:q].present? || params[:start_date].present? || params[:end_date].present? %>
+          <h3>No sales match your filters</h3>
+          <p>Try a different search term or a wider date range.</p>
+          <%= link_to "Clear Filters", sales_path, class: "btn btn-primary" %>
+        <% else %>
+          <h3>No sales yet</h3>
+          <p>Start selling to see your sales history here.</p>
+          <%= link_to "Create Your First Sale", new_sale_path, class: "btn btn-primary" %>
+        <% end %>
       </div>
     <% else %>
       <div class="stagger" style="display:flex; flex-direction:column; gap:12px;">
@@ -77,4 +146,81 @@
   .badge.payment-cash{ background:var(--success-light); color:var(--success); }
   .badge.payment-card{ background:#e0f2fe; color:#0369a1; }
   .badge.payment-jazzcash, .badge.payment-easypaisa{ background:var(--warning-light); color:#92650a; }
+
+  .quick-range-chips{ display:flex; flex-wrap:wrap; gap:8px; }
+  .chip{
+    background:var(--bg); border:1.4px solid var(--border); border-radius:999px; padding:7px 14px;
+    font-size:12.5px; font-weight:700; color:var(--text); cursor:pointer; transition:.15s; font-family:inherit;
+  }
+  .chip:hover{ border-color:var(--primary); color:var(--primary); }
+  .chip.active{ background:var(--primary); border-color:var(--primary); color:#fff; }
+
+  .active-filters{
+    display:flex; align-items:center; gap:8px; margin-top:14px; padding:10px 14px;
+    background:var(--primary-light, #eef2ff); border-radius:12px; font-size:13px; color:var(--text);
+  }
+  .active-filters i{ color:var(--primary); }
 </style>
+
+<script>
+  (function () {
+    const q = document.getElementById('sales_q');
+    const clearBtn = document.getElementById('clearSearchBtn');
+    const startDate = document.getElementById('sales_start_date');
+    const endDate = document.getElementById('sales_end_date');
+
+    if (q && clearBtn) {
+      q.addEventListener('input', () => { clearBtn.style.display = q.value ? '' : 'none'; });
+      clearBtn.addEventListener('click', () => { q.value = ''; clearBtn.style.display = 'none'; q.focus(); });
+    }
+
+    function toLocalDateString(d) {
+      const offset = d.getTimezoneOffset();
+      const local = new Date(d.getTime() - offset * 60000);
+      return local.toISOString().slice(0, 10);
+    }
+
+    document.querySelectorAll('.chip[data-range]').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        const range = chip.dataset.range;
+        const today = new Date();
+        let from = new Date();
+        let to = new Date();
+
+        switch (range) {
+          case 'today':
+            break;
+          case 'yesterday':
+            from.setDate(today.getDate() - 1);
+            to.setDate(today.getDate() - 1);
+            break;
+          case '7':
+            from.setDate(today.getDate() - 6);
+            break;
+          case '30':
+            from.setDate(today.getDate() - 29);
+            break;
+          case 'month':
+            from = new Date(today.getFullYear(), today.getMonth(), 1);
+            break;
+        }
+
+        if (startDate) startDate.value = toLocalDateString(from);
+        if (endDate) endDate.value = toLocalDateString(to);
+
+        document.querySelectorAll('.chip[data-range]').forEach((c) => c.classList.remove('active'));
+        chip.classList.add('active');
+      });
+    });
+
+    // Guard: if "From date" is after "To date", nudge the end date forward automatically.
+    if (startDate && endDate) {
+      startDate.addEventListener('change', () => {
+        if (endDate.value && startDate.value > endDate.value) endDate.value = startDate.value;
+      });
+      endDate.addEventListener('change', () => {
+        if (startDate.value && endDate.value < startDate.value) startDate.value = endDate.value;
+      });
+    }
+  })();
+</script>

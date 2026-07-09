@@ -7,6 +7,8 @@ class SalesController < ApplicationController
                     .includes(:user, :customer, sale_items: :product)
                     .order(created_at: :desc)
     @today_sales = Current.shop.sales.where(created_at: Date.current.all_day)
+
+    @sales = apply_sales_filters(@sales)
   end
 
   def new
@@ -104,6 +106,43 @@ class SalesController < ApplicationController
   end
 
   private
+
+  def apply_sales_filters(scope)
+    scope = filter_by_date_range(scope)
+    scope = filter_by_search_term(scope)
+    scope
+  end
+
+  def filter_by_date_range(scope)
+    if params[:start_date].present?
+      start_date = safe_parse_date(params[:start_date])
+      scope = scope.where("sales.created_at >= ?", start_date.beginning_of_day) if start_date
+    end
+
+    if params[:end_date].present?
+      end_date = safe_parse_date(params[:end_date])
+      scope = scope.where("sales.created_at <= ?", end_date.end_of_day) if end_date
+    end
+
+    scope
+  end
+
+  def filter_by_search_term(scope)
+    return scope unless params[:q].present?
+
+    term = "%#{params[:q].strip}%"
+    scope.left_joins(:customer)
+         .where(
+           "sales.invoice_no ILIKE :term OR customers.name ILIKE :term OR sales.payment_method ILIKE :term",
+           term: term
+         )
+  end
+
+  def safe_parse_date(value)
+    Date.parse(value)
+  rescue ArgumentError, TypeError
+    nil
+  end
   
   def set_sale
     @sale = Current.shop.sales.find(params[:id])
