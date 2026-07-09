@@ -28,7 +28,7 @@
       <div class="flex gap-10" style="margin-top:8px;">
         <%= form.text_field :barcode, required: true, class: "form-control barcode-input", placeholder: "Scan or enter barcode",
               id: "product_barcode", pattern: "[0-9]+", inputmode: "numeric" %>
-        <button type="button" class="btn btn-icon" style="background:rgba(255,255,255,.2); color:#fff;" onclick="productForm.openScanner()">
+        <button type="button" class="btn btn-icon" id="scanBarcodeBtn" style="background:rgba(255,255,255,.2); color:#fff;" onclick="productForm.openScanner()">
           <i class="fa-solid fa-barcode"></i>
         </button>
       </div>
@@ -36,6 +36,10 @@
         <span id="barcodeStatusIcon"><i class="fa-solid fa-magnifying-glass"></i></span>
         <span id="barcodeStatusText">Scan or enter barcode</span>
       </div>
+      <label class="no-barcode-toggle">
+        <input type="checkbox" id="no_barcode_toggle">
+        <span>This product has no barcode</span>
+      </label>
     </div>
 
     <!-- Details -->
@@ -127,6 +131,8 @@
   .barcode-banner{ background:linear-gradient(135deg,#f093fb 0%,#f5576c 100%); border-radius:18px; padding:20px; margin-bottom:16px; color:#fff; }
   .barcode-input{ background:rgba(255,255,255,.95); border:none; color:var(--text); flex:1; }
   .barcode-validation{ display:flex; align-items:center; gap:8px; font-size:13.5px; margin-top:10px; font-weight:600; }
+  .no-barcode-toggle{ display:flex; align-items:center; gap:8px; margin-top:12px; font-size:13.5px; font-weight:600; color:#fff; cursor:pointer; user-select:none; }
+  .no-barcode-toggle input[type="checkbox"]{ width:18px; height:18px; accent-color:#fff; cursor:pointer; }
 
   .sticky-actions{ position:sticky; bottom:14px; background:var(--surface); padding:14px; border-radius:16px; border:1px solid var(--border); box-shadow:var(--shadow); margin-top:4px; }
 
@@ -148,6 +154,21 @@
 </style>
 
 <script>
+// Special (non-numeric) marker for products with no real barcode.
+// Uses a dash-separated, non-numeric prefix so it can never collide with a
+// real scanned barcode (which is always digits-only), plus a UUID/random
+// suffix so it never collides with another "no barcode" product either.
+const NO_BARCODE_PREFIX = 'NO-BARCODE-';
+function generateNoBarcodeValue() {
+  const unique = (window.crypto && typeof crypto.randomUUID === 'function')
+    ? crypto.randomUUID()
+    : (Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10));
+  return NO_BARCODE_PREFIX + unique;
+}
+function isNoBarcodeValue(value) {
+  return typeof value === 'string' && value.startsWith(NO_BARCODE_PREFIX);
+}
+
 function isValidBarcodeChecksum(code) {
   const digits = code.split('').map(Number);
   const len = digits.length;
@@ -172,7 +193,41 @@ class ProductForm {
     this.setupBarcodeValidation();
     this.setupFormEnhancements();
     this.setupEventListeners();
+    this.setupNoBarcodeToggle();
     this.initialized = true;
+  }
+  setupNoBarcodeToggle() {
+    const toggle = document.getElementById('no_barcode_toggle');
+    if (!toggle) return;
+    toggle.addEventListener('change', (e) => this.toggleNoBarcode(e.target.checked));
+  }
+  toggleNoBarcode(checked) {
+    const barcodeField = document.getElementById('product_barcode');
+    const scanBtn = document.getElementById('scanBarcodeBtn');
+    const statusIcon = document.getElementById('barcodeStatusIcon');
+    const statusText = document.getElementById('barcodeStatusText');
+    if (!barcodeField) return;
+
+    if (checked) {
+      // Remember whatever the user had typed so we can restore it if they untick the toggle.
+      this._manualBarcodeValue = isNoBarcodeValue(barcodeField.value) ? '' : barcodeField.value;
+      barcodeField.value = generateNoBarcodeValue();
+      barcodeField.readOnly = true;
+      barcodeField.removeAttribute('pattern');
+      barcodeField.removeAttribute('inputmode');
+      barcodeField.classList.add('is-no-barcode');
+      if (scanBtn) { scanBtn.disabled = true; scanBtn.style.opacity = '0.5'; scanBtn.style.pointerEvents = 'none'; }
+      if (statusIcon) statusIcon.innerHTML = '<i class="fa-solid fa-ban"></i>';
+      if (statusText) statusText.textContent = 'No barcode — auto-generated ID assigned';
+    } else {
+      barcodeField.readOnly = false;
+      barcodeField.setAttribute('pattern', '[0-9]+');
+      barcodeField.setAttribute('inputmode', 'numeric');
+      barcodeField.classList.remove('is-no-barcode');
+      barcodeField.value = this._manualBarcodeValue || '';
+      if (scanBtn) { scanBtn.disabled = false; scanBtn.style.opacity = ''; scanBtn.style.pointerEvents = ''; }
+      this.validateBarcode(barcodeField.value);
+    }
   }
   destroy() { this.closeScanner(); this.initialized = false; }
   setupEventListeners() {
@@ -221,6 +276,7 @@ class ProductForm {
   validateBarcode(barcode) {
     const statusIcon = document.getElementById('barcodeStatusIcon');
     const statusText = document.getElementById('barcodeStatusText');
+    if (isNoBarcodeValue(barcode)) { statusIcon.innerHTML = '<i class="fa-solid fa-ban"></i>'; statusText.textContent = 'No barcode — auto-generated ID assigned'; return true; }
     if (!barcode) { statusIcon.innerHTML = '<i class="fa-solid fa-magnifying-glass"></i>'; statusText.textContent = 'Scan or enter barcode'; return false; }
     const isValid = /^\d{8,20}$/.test(barcode);
     if (isValid) { statusIcon.innerHTML = '<i class="fa-solid fa-circle-check"></i>'; statusText.textContent = 'Valid barcode'; return true; }
@@ -354,6 +410,11 @@ function clearForm() {
     title: 'Clear form?', body: 'All entered fields will be cleared.', confirmText: 'Clear', confirmClass: 'btn-danger',
     onConfirm: () => {
       document.getElementById('product-form').reset();
+      const toggle = document.getElementById('no_barcode_toggle');
+      if (toggle && toggle.checked) {
+        toggle.checked = false;
+        if (window.productForm) window.productForm.toggleNoBarcode(false);
+      }
       if (window.productForm) window.productForm.validateBarcode('');
       POS.toast('Form cleared', 'info');
     }
