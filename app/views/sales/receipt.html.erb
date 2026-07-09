@@ -17,7 +17,7 @@
 
     <div class="receipt-info">
       <div><span>Invoice #</span><strong><%= @sale.invoice_no %></strong></div>
-      <div><span>Date</span><strong><%= @sale.created_at.localtime.strftime("%d/%m/%Y %I:%M %p") %></strong></div>
+      <div><span>Date</span><strong><%= @sale.created_at.in_time_zone("Islamabad").strftime("%d/%m/%Y %I:%M %p") %></strong></div>
       <div><span>Cashier</span><strong><%= @sale.user.full_name %></strong></div>
       <% if @sale.customer %>
         <div><span>Customer</span><strong><%= @sale.customer.name %></strong></div>
@@ -82,7 +82,7 @@ const receiptData = <%= {
   shop_address: Current.shop.address,
   shop_phone: Current.shop.phone,
   invoice_no: @sale.invoice_no,
-  date: @sale.created_at.localtime.strftime("%d/%m/%Y %I:%M %p"),
+  date: @sale.created_at.in_time_zone("Islamabad").strftime("%d/%m/%Y %I:%M %p"),
   cashier: @sale.user.full_name,
   customer: (@sale.customer&.name || ""),
   items: @sale.sale_items.map { |i|
