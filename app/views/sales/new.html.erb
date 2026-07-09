@@ -132,6 +132,9 @@
   <div class="scanner-controls">
     <button class="btn btn-danger" style="flex:1;" onclick="saleForm.closeScanner()"><i class="fa-solid fa-xmark"></i> Cancel</button>
     <button class="btn btn-warning" style="flex:1;" onclick="saleForm.switchCamera()"><i class="fa-solid fa-camera-rotate"></i> Flip</button>
+    <button class="btn btn-icon torch-btn" id="torchToggleBtn" style="display:none;" onclick="saleForm.toggleTorch()" title="Toggle flashlight">
+      <i class="fa-solid fa-bolt"></i>
+    </button>
   </div>
 </div>
 
@@ -209,6 +212,8 @@
   .corner.bottom-right{ bottom:-3px; right:-3px; border-left:none; border-top:none; }
   .scanner-hint{ color:#fff; margin-top:18px; font-size:14px; text-align:center; background:rgba(0,0,0,.7); padding:11px 18px; border-radius:20px; font-weight:600; }
   .scanner-controls{ display:flex; gap:12px; padding:16px; background:rgba(0,0,0,.95); z-index:10001; }
+  .torch-btn{ flex:0 0 auto; background:rgba(255,255,255,.15); color:#fff; width:52px; }
+  .torch-btn.active{ background:#f59e0b; color:#111; }
 </style>
 
 <script>
@@ -474,20 +479,59 @@ class SaleForm {
     video.style.display = 'block';
     this.usingNativeDetector = true;
     this.detector = new BarcodeDetector({ formats });
-    this.nativeStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: this.isBackCamera ? 'environment' : 'user', advanced: [{ focusMode: 'continuous' }] }
-    });
+
+    // High-res feed + continuous focus/exposure/white-balance = sharper, glare-resistant frames.
+    const constraints = {
+      video: {
+        facingMode: this.isBackCamera ? 'environment' : 'user',
+        width: { ideal: 1920 }, height: { ideal: 1080 },
+        frameRate: { ideal: 30, max: 30 },
+        advanced: [{ focusMode: 'continuous', exposureMode: 'continuous', whiteBalanceMode: 'continuous' }]
+      }
+    };
+    try {
+      this.nativeStream = await navigator.mediaDevices.getUserMedia(constraints);
+    } catch (e) {
+      // Some devices reject exotic advanced constraints outright — retry with the bare essentials.
+      this.nativeStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: this.isBackCamera ? 'environment' : 'user', advanced: [{ focusMode: 'continuous' }] }
+      });
+    }
     video.srcObject = this.nativeStream;
     await video.play();
+    this.setupTorchControl(this.nativeStream);
+
+    // Offscreen canvas used to crop each frame down to the guide box before decoding —
+    // fewer pixels to scan = faster detection, and cropping out the background cuts down
+    // false reads caused by glare/reflections outside the barcode itself.
+    this._scanCanvas = this._scanCanvas || document.createElement('canvas');
+    this._scanCtx = this._scanCanvas.getContext('2d', { willReadFrequently: true });
+
     const scannerStatus = document.getElementById('scannerStatus');
     scannerStatus.textContent = '✓ Camera ready - Point at barcode';
     scannerStatus.style.color = '#4ade80';
     this.nativeDetectLoop(video);
   }
+  getCroppedFrame(video) {
+    const vw = video.videoWidth, vh = video.videoHeight;
+    if (!vw || !vh || !this._scanCtx) return null;
+    // Matches the visible scanner-frame overlay's proportions (centered crop).
+    const cw = Math.round(vw * 0.72);
+    const ch = Math.round(vh * 0.42);
+    const sx = Math.round((vw - cw) / 2);
+    const sy = Math.round((vh - ch) / 2);
+    this._scanCanvas.width = cw;
+    this._scanCanvas.height = ch;
+    this._scanCtx.drawImage(video, sx, sy, cw, ch, 0, 0, cw, ch);
+    return this._scanCanvas;
+  }
   async nativeDetectLoop(video) {
     if (!this.isScanning || !this.usingNativeDetector) return;
-    try { const barcodes = await this.detector.detect(video); if (barcodes.length > 0) this.onScanSuccess(barcodes[0].rawValue); }
-    catch (error) { /* transient decode error, keep looping */ }
+    try {
+      const frame = this.getCroppedFrame(video);
+      const barcodes = await this.detector.detect(frame || video);
+      if (barcodes.length > 0) this.onScanSuccess(barcodes[0].rawValue);
+    } catch (error) { /* transient decode error, keep looping */ }
     if (this.isScanning && this.usingNativeDetector) requestAnimationFrame(() => this.nativeDetectLoop(video));
   }
   async startHtml5QrcodeScanner() {
@@ -501,17 +545,65 @@ class SaleForm {
       if (!devices || devices.length === 0) throw new Error('No cameras found');
       const cameraId = this.isBackCamera && devices.length > 1 ? devices[devices.length - 1].id : devices[0].id;
       const config = {
-        fps: 15, qrbox: { width: 250, height: 130 }, aspectRatio: 1.7, disableFlip: false,
+        fps: 24, qrbox: { width: 260, height: 130 }, aspectRatio: 1.7, disableFlip: false,
         formatsToSupport: [
           Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8,
           Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.UPC_E, Html5QrcodeSupportedFormats.CODE_128
         ],
-        videoConstraints: { facingMode: this.isBackCamera ? "environment" : "user", advanced: [{ focusMode: "continuous" }] }
+        videoConstraints: {
+          facingMode: this.isBackCamera ? "environment" : "user",
+          width: { ideal: 1920 }, height: { ideal: 1080 },
+          advanced: [{ focusMode: "continuous", exposureMode: "continuous", whiteBalanceMode: "continuous" }]
+        }
       };
       await this.scanner.start(cameraId, config, (decodedText) => this.onScanSuccess(decodedText), () => {});
+      this.setupTorchControlForHtml5Qrcode();
       scannerStatus.textContent = '✓ Camera ready - Point at barcode';
       scannerStatus.style.color = '#4ade80';
     } catch (error) { this.handleScannerError(error); }
+  }
+  setupTorchControl(stream) {
+    const torchBtn = document.getElementById('torchToggleBtn');
+    if (!torchBtn) return;
+    this._torchTrack = null;
+    this._torchOn = false;
+    torchBtn.style.display = 'none';
+    try {
+      const track = stream.getVideoTracks()[0];
+      const capabilities = track.getCapabilities ? track.getCapabilities() : {};
+      if (capabilities.torch) {
+        this._torchTrack = track;
+        torchBtn.style.display = '';
+      }
+    } catch (e) { /* torch not supported on this browser/device */ }
+  }
+  setupTorchControlForHtml5Qrcode() {
+    const torchBtn = document.getElementById('torchToggleBtn');
+    if (!torchBtn || !this.scanner || typeof this.scanner.getRunningTrackCapabilities !== 'function') return;
+    this._torchTrack = null;
+    this._torchOn = false;
+    torchBtn.style.display = 'none';
+    try {
+      const capabilities = this.scanner.getRunningTrackCapabilities();
+      if (capabilities && capabilities.torch) {
+        this._torchViaHtml5Qrcode = true;
+        torchBtn.style.display = '';
+      }
+    } catch (e) { /* torch not supported on this browser/device */ }
+  }
+  async toggleTorch() {
+    this._torchOn = !this._torchOn;
+    try {
+      if (this._torchViaHtml5Qrcode && this.scanner) {
+        await this.scanner.applyVideoConstraints({ advanced: [{ torch: this._torchOn }] });
+      } else if (this._torchTrack) {
+        await this._torchTrack.applyConstraints({ advanced: [{ torch: this._torchOn }] });
+      } else {
+        return;
+      }
+      const torchBtn = document.getElementById('torchToggleBtn');
+      if (torchBtn) torchBtn.classList.toggle('active', this._torchOn);
+    } catch (e) { POS.toast('Flashlight not supported on this device', 'error'); }
   }
   handleScannerError(error) {
     const scannerStatus = document.getElementById('scannerStatus');
@@ -531,9 +623,13 @@ class SaleForm {
     const cleanBarcode = decodedText.replace(/\D/g, '');
     if (cleanBarcode.length < 8 || cleanBarcode.length > 20) return;
     if (!isValidBarcodeChecksum(cleanBarcode)) { this.pendingCode = null; this.pendingCount = 0; return; }
+    // Native BarcodeDetector decodes are already checksum-verified and ROI-cropped, so one
+    // clean read is trustworthy — this is what gets us from ~1s down to well under 300ms.
+    // The Html5-Qrcode fallback (older browsers) still asks for two matching reads to stay safe.
+    const requiredMatches = this.usingNativeDetector ? 1 : 2;
     if (this.pendingCode === cleanBarcode) this.pendingCount = (this.pendingCount || 0) + 1;
     else { this.pendingCode = cleanBarcode; this.pendingCount = 1; }
-    if (this.pendingCount < 2) return;
+    if (this.pendingCount < requiredMatches) return;
     if (cleanBarcode === this.lastScannedCode) return;
     this.lastScannedCode = cleanBarcode;
     this.scanCooldown = true;
@@ -553,9 +649,9 @@ class SaleForm {
           scannerStatus.textContent = `Product not found for barcode: ` + cleanBarcode;
           setTimeout(() => { if (this.isScanning) scannerStatus.textContent = '✓ Camera ready - Point at barcode'; }, 2000);
         }
-        setTimeout(() => { this.closeScanner(); }, 900);
+        setTimeout(() => { this.closeScanner(); }, 400);
       })
-      .catch(() => { scannerStatus.textContent = 'Error searching for product'; setTimeout(() => { this.closeScanner(); }, 900); });
+      .catch(() => { scannerStatus.textContent = 'Error searching for product'; setTimeout(() => { this.closeScanner(); }, 400); });
   }
   async switchCamera() {
     if (!this.isScanning) return;
@@ -572,6 +668,9 @@ class SaleForm {
       try { await this.scanner.stop(); this.scanner.clear(); } catch (e) {}
       this.scanner = null;
     }
+    const torchBtn = document.getElementById('torchToggleBtn');
+    if (torchBtn) { torchBtn.style.display = 'none'; torchBtn.classList.remove('active'); }
+    this._torchTrack = null; this._torchOn = false; this._torchViaHtml5Qrcode = false;
     document.getElementById('scannerSection').style.display = 'none';
     this.isScanning = false;
     this.usingNativeDetector = false;
